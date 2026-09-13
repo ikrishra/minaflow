@@ -270,8 +270,8 @@ public class FloatingHUDWindow: NSPanel {
             // Nested directly below the physical MacBook notch bezel
             y = screen.frame.maxY - safeTop - pillHeight + 2
         } else {
-            // Signature bottom floating capsule (Wispr Flow style), above dock, clear of all window headers
-            y = screenRect.minY + 84
+            // Signature bottom floating capsule, comfortably above dock
+            y = screenRect.minY + 48
         }
 
         self.setFrame(NSRect(x: x, y: y, width: pillWidth, height: pillHeight), display: true)
