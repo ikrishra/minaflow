@@ -580,10 +580,25 @@ public struct OnboardingView: View {
                selectedLanguages.contains(where: { $0.caseInsensitiveCompare("Hinglish") == .orderedSame })
     }
 
+    private var isEnglishSelected: Bool {
+        return selectedLanguages.contains(where: { $0.caseInsensitiveCompare("English") == .orderedSame })
+    }
+
     private var onboardingVisibleModels: [WhisperModelOption] {
         if isHinglishSelected {
             return LocalWhisperEngine.hinglishModels
+        } else if !isEnglishSelected {
+            // User did not select English: do NOT show English-only models (Parakeet V2, small.en, base.en).
+            // Only offer multilingual models (Turbo, Small multilingual, Base multilingual, Large-v3).
+            var models = LocalWhisperEngine.generalModels.filter { !$0.isEnglishOnly }
+            models.sort { a, b in
+                if a.id == "turbo" { return true }
+                if b.id == "turbo" { return false }
+                return false
+            }
+            return models
         } else {
+            // User selected English: show all models with Turbo first, Parakeet V2, etc.
             var models = LocalWhisperEngine.generalModels
             models.sort { a, b in
                 if a.id == "turbo" { return true }
@@ -1040,7 +1055,12 @@ public struct OnboardingView: View {
             languageMode = "manual"
             ConfigManager.shared.updateLanguageMode("manual")
             ConfigManager.shared.updateSelectedLanguages([l])
-            if selectedLocalModel == "apex-q8" || selectedLocalModel == "apex-q5" {
+            let isEnglish = (l.caseInsensitiveCompare("English") == .orderedSame)
+            if !isEnglish && LocalWhisperEngine.shared.isEnglishOnlyModel(selectedLocalModel) {
+                // Parakeet V2 and other English-only models cannot transcribe non-English! Fallback to multilingual Turbo.
+                selectedLocalModel = "turbo"
+                ConfigManager.shared.updateLocalWhisperModel("turbo")
+            } else if selectedLocalModel == "apex-q8" || selectedLocalModel == "apex-q5" {
                 selectedLocalModel = "turbo"
                 ConfigManager.shared.updateLocalWhisperModel("turbo")
             }
