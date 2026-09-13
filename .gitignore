@@ -1,0 +1,39 @@
+# Swift & Xcode Build Artifacts
+.build/
+.swiftpm/
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+DerivedData/
+
+# Built Binaries and Package Installers
+*.app
+*.app/
+*.dmg
+*.zip
+
+# Private Business & Backend Infrastructure (Kept Private)
+website/
+cloudflare-worker/
+
+# Cloned External Reference Repositories
+open-source/
+
+# Sensitive environment and key files
+local.mk
+.env
+.env.*
+*.pem
+*.p12
+*.cer
+*.mobileprovision
+
+# OS Files
+.DS_Store
+*.swp
+*~
+
+# Internal notes & scratch
+DIRECTORY_SUBMISSION_INFO.txt
+Important*
+verify

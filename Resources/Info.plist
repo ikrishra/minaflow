@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>MinaFlow</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.krishna.minaflow</string>
+    <key>CFBundleName</key>
+    <string>MinaFlow</string>
+    <key>CFBundleDisplayName</key>
+    <string>MinaFlow</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.2.0</string>
+    <key>CFBundleVersion</key>
+    <string>3</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>MinaFlow requires microphone access to transcribe your speech into text using AI.</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>MinaFlow requires accessibility permissions to detect the global hotkey and type text at your cursor.</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>SUFeedURL</key>
+    <string>https://minaflow.krishra.com/appcast.xml</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUPublicEDKey</key>
+    <string>5pjlUgljjmpwQs7Y0NU6gJMMIVVYBQONq+EagbTgwug=</string>
+</dict>
+</plist>
