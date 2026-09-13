@@ -65,37 +65,8 @@ kill:
 	@-pkill -f "MinaType" 2>/dev/null || true
 
 dmg: build
-	@echo "Creating MinaFlow.dmg with Applications drag-and-drop link..."
-	@rm -rf .dmg-staging MinaFlow.dmg website/public/MinaFlow.dmg website/dist/MinaFlow.dmg
-	@python3 scripts/generate_clean_dmg_bg.py
-	@mkdir -p .dmg-staging
-	@cp -R $(APP_BUNDLE) .dmg-staging/
-	@if command -v create-dmg >/dev/null 2>&1; then \
-		create-dmg \
-			--volname "MinaFlow" \
-			--background "Resources/dmg-background.png" \
-			--window-pos 200 120 \
-			--window-size 660 400 \
-			--icon-size 120 \
-			--icon "$(APP_NAME).app" 180 190 \
-			--hide-extension "$(APP_NAME).app" \
-			--app-drop-link 480 190 \
-			--overwrite \
-			MinaFlow.dmg \
-			.dmg-staging || { \
-				rm -rf .dmg-staging; \
-				mkdir -p .dmg-staging; \
-				cp -R $(APP_BUNDLE) .dmg-staging/; \
-				ln -s /Applications .dmg-staging/Applications; \
-				hdiutil create -volname "MinaFlow" -srcfolder .dmg-staging -ov -format UDZO MinaFlow.dmg; \
-			}; \
-	else \
-		ln -s /Applications .dmg-staging/Applications; \
-		hdiutil create -volname "MinaFlow" -srcfolder .dmg-staging -ov -format UDZO MinaFlow.dmg; \
-	fi
-	@rm -rf .dmg-staging
-	@echo "Signing MinaFlow.dmg with Developer ID..."
-	@codesign --force --sign "$(IDENTITY)" MinaFlow.dmg
+	@echo "Creating MinaFlow.dmg with custom drag-and-drop installer layout..."
+	@IDENTITY="$(IDENTITY)" python3 scripts/build_dmg.py
 	@cp MinaFlow.dmg website/public/MinaFlow.dmg
 	@cp MinaFlow.dmg website/dist/MinaFlow.dmg 2>/dev/null || true
 	@echo "Created signed MinaFlow.dmg!"

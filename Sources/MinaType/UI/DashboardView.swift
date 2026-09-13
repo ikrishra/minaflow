@@ -3,6 +3,7 @@ import AppKit
 import ServiceManagement
 import CoreAudio
 import UniformTypeIdentifiers
+import AVFoundation
 
 // MARK: - MinaFlow Dashboard View (Website-Grade Design System, Zero Emojis)
 public struct DashboardView: View {
@@ -300,6 +301,11 @@ Thank you!
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MinaFlowToneUpdated"))) { _ in
             self.toneMode = ConfigManager.shared.config.toneMode
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MinaFlowAIPolishUpdated"))) { _ in
+            let cfg = ConfigManager.shared.config
+            self.isAIPolishEnabled = cfg.isAIPolishEnabled
+            self.toneMode = cfg.toneMode
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MinaFlowHinglishModelUpdated"))) { _ in
             self.hinglishModel = ConfigManager.shared.config.hinglishModel
         }
@@ -323,7 +329,7 @@ Thank you!
             self.snippets = cfg.snippets
             self.playSounds = cfg.playSounds
             self.hudStyle = cfg.hudStyle
-            self.toneMode = cfg.toneMode
+            self.toneMode = cfg.isAIPolishEnabled ? cfg.toneMode : "veryCasual"
             self.anthropicApiKey = cfg.anthropicApiKey
             self.openrouterApiKey = cfg.openrouterApiKey
             self.geminiApiKey = cfg.geminiApiKey
@@ -1846,6 +1852,9 @@ Thank you!
                             }
                             withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
                                 isAIPolishEnabled.toggle()
+                                if !isAIPolishEnabled {
+                                    toneMode = "veryCasual"
+                                }
                                 ConfigManager.shared.updateAIPolishEnabled(isAIPolishEnabled)
                             }
                         }) {
@@ -3143,18 +3152,39 @@ Thank you!
                                 .foregroundColor(textMuted)
                         }
                         Spacer()
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 12))
-                                .foregroundColor(.green)
-                            Text("Granted")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.green)
+                        let isMicGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+                        if isMicGranted {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.green)
+                                Text("Granted")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(.green)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.green.opacity(0.12))
+                            .cornerRadius(6)
+                        } else {
+                            Button(action: {
+                                Task {
+                                    let ok = await AudioRecorder.shared.requestMicrophonePermission()
+                                    if !ok {
+                                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
+                                    }
+                                }
+                            }) {
+                                Text("Grant Permission")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(brandOrange)
+                                    .foregroundColor(.white)
+                                    .cornerRadius(6)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.green.opacity(0.12))
-                        .cornerRadius(6)
                     }
 
                     Divider().background(cardBorder.opacity(0.7))

@@ -71,7 +71,7 @@ public class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     // MARK: - Public API
 
-    public func show() {
+    public func show(step: Int = 0) {
         guard let window = window else { return }
         NSApp.setActivationPolicy(.regular)
         let isDark = ConfigManager.shared.config.appTheme == "dark"
@@ -79,7 +79,7 @@ public class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             ? NSColor(red: 9/255.0, green: 9/255.0, blue: 11/255.0, alpha: 1)
             : NSColor.white
         // Refresh content so @State re-initializes from current ConfigManager values
-        window.contentView = NSHostingView(rootView: OnboardingView())
+        window.contentView = NSHostingView(rootView: OnboardingView(initialStep: step))
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)

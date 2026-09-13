@@ -241,6 +241,9 @@ public struct MenuBarPopoverView: View {
                         }
                         withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
                             isAIPolishEnabled.toggle()
+                            if !isAIPolishEnabled {
+                                toneMode = "veryCasual"
+                            }
                             ConfigManager.shared.updateAIPolishEnabled(isAIPolishEnabled)
                         }
                         FloatingHUDWindow.shared.setMode(.listening)
@@ -652,12 +655,12 @@ public struct MenuBarPopoverView: View {
     private func refreshState() {
         let config = ConfigManager.shared.config
         triggerMode       = config.mode
-        toneMode          = config.toneMode
+        isLicenseActivated = config.isLicenseActivated
+        isAIPolishEnabled  = config.isAIPolishEnabled
+        toneMode          = config.isAIPolishEnabled ? config.toneMode : "veryCasual"
         languageMode      = config.languageMode
         selectedLanguages = config.selectedLanguages
         hotkey            = config.hotkey
-        isLicenseActivated = config.isLicenseActivated
-        isAIPolishEnabled  = config.isAIPolishEnabled
         hasAIProvider      = config.hasConfiguredAIProvider
         trialUsed          = config.trialDictationsUsed
         audioDeviceManager.refreshDevices()

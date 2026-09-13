@@ -7,7 +7,7 @@ import AVFoundation
 
 public struct OnboardingView: View {
 
-    @State private var step: Int = 0
+    @State private var step: Int
     @State private var hotkey: String   = ConfigManager.shared.config.hotkey
     @State private var mode: String     = ConfigManager.shared.config.mode
     @State private var micGranted: Bool = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
@@ -19,6 +19,10 @@ public struct OnboardingView: View {
     @State private var showDockIcon: Bool = ConfigManager.shared.config.showDockIcon
     @State private var permTimer: Timer? = nil
     @State private var isDark: Bool = (ConfigManager.shared.config.appTheme == "dark")
+
+    public init(initialStep: Int = 0) {
+        _step = State(initialValue: initialStep)
+    }
 
     // Live Mic Test State (matching Screenshot 1)
     @State private var liveAudioLevel: Float = 0.0
@@ -36,7 +40,13 @@ public struct OnboardingView: View {
     // Speech Engine Setup State
     @ObservedObject private var localWhisper = LocalWhisperEngine.shared
     @State private var engineSetupKind: String = "local" // "local" or "cloud"
-    @State private var selectedLocalModel: String = ConfigManager.shared.config.localWhisperModel.isEmpty ? "base" : ConfigManager.shared.config.localWhisperModel
+    @State private var selectedLocalModel: String = {
+        let saved = ConfigManager.shared.config.localWhisperModel
+        if !saved.isEmpty && LocalWhisperEngine.availableModels.contains(where: { $0.id == saved }) {
+            return saved
+        }
+        return "turbo"
+    }()
     @State private var selectedCloudProvider: String = "Groq" // "Groq", "Deepgram", "OpenAI", "Localhost (Ollama)"
     @State private var cloudApiKey: String = ""
     @State private var customOllamaUrl: String = ConfigManager.shared.config.customApiUrl
@@ -48,8 +58,8 @@ public struct OnboardingView: View {
         ("hand.wave.fill",      "Welcome"),
         ("lock.shield.fill",    "Permissions"),
         ("mic.badge.waveform",  "Test Mic"),
-        ("cpu",                 "Speech Engine"),
         ("globe",               "Languages"),
+        ("cpu",                 "Speech Engine"),
         ("keyboard",            "Trigger Key"),
         ("hand.tap",            "Trigger Mode"),
         ("checkmark.seal.fill", "All Set"),
@@ -171,8 +181,8 @@ public struct OnboardingView: View {
                 case 0: welcomeStep
                 case 1: permissionsStep
                 case 2: testMicStep
-                case 3: speechEngineStep
-                case 4: languagesStep
+                case 3: languagesStep
+                case 4: speechEngineStep
                 case 5: triggerKeyStep
                 case 6: triggerModeStep
                 case 7: allSetStep
@@ -222,15 +232,16 @@ public struct OnboardingView: View {
         switch step {
         case 1:
             return micGranted && axGranted
-        case 3:
+        case 4:
             if engineSetupKind == "local" {
                 return localWhisper.isModelDownloaded(selectedLocalModel)
             } else {
-                return isCloudVerified ||
-                    (selectedCloudProvider == "Groq" && !ConfigManager.shared.config.groqApiKey.isEmpty) ||
-                    (selectedCloudProvider == "Deepgram" && !ConfigManager.shared.config.deepgramApiKey.isEmpty) ||
-                    (selectedCloudProvider == "OpenAI" && !ConfigManager.shared.config.openaiApiKey.isEmpty) ||
-                    (selectedCloudProvider == "Localhost (Ollama)" && !ConfigManager.shared.config.customApiUrl.isEmpty)
+                if selectedCloudProvider == "Localhost (Ollama)" {
+                    return !customOllamaUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                }
+                let key = cloudApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !key.isEmpty else { return false }
+                return isCloudVerified || key.count >= 10
             }
         default:
             return true
@@ -239,6 +250,10 @@ public struct OnboardingView: View {
 
     private func advance() {
         if step == 3 {
+            // Save Languages choice
+            ConfigManager.shared.updateLanguageMode(languageMode)
+            ConfigManager.shared.updateSelectedLanguages(selectedLanguages)
+        } else if step == 4 {
             // Save Speech Engine choice
             if engineSetupKind == "local" {
                 ConfigManager.shared.updateSTTProvider(.localWhisper)
@@ -560,19 +575,44 @@ public struct OnboardingView: View {
         }
     }
 
-    private var localWhisperOnboardingCard: some View {
-        let opt = LocalWhisperEngine.availableModels.first(where: { $0.id == selectedLocalModel }) ?? LocalWhisperEngine.availableModels[1]
-        let isDownloaded = localWhisper.isModelDownloaded(selectedLocalModel)
-        let isDownloading = localWhisper.isDownloading[selectedLocalModel] ?? false
-        let progress = localWhisper.downloadProgress[selectedLocalModel] ?? 0.0
+    private var isHinglishSelected: Bool {
+        return languageMode == "hinglish" ||
+               selectedLanguages.contains(where: { $0.caseInsensitiveCompare("Hinglish") == .orderedSame })
+    }
 
-        return VStack(alignment: .leading, spacing: 12) {
-            whisperPrivacyBanner
-            whisperModelSelector(opt: opt)
-            Divider().background(border)
-            whisperStatusAction(opt: opt, isDownloaded: isDownloaded, isDownloading: isDownloading, progress: progress)
+    private var onboardingVisibleModels: [WhisperModelOption] {
+        if isHinglishSelected {
+            return LocalWhisperEngine.hinglishModels
+        } else {
+            var models = LocalWhisperEngine.generalModels
+            models.sort { a, b in
+                if a.id == "turbo" { return true }
+                if b.id == "turbo" { return false }
+                return false
+            }
+            return models
         }
-        .padding(14)
+    }
+
+    private var localWhisperOnboardingCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            whisperPrivacyBanner
+
+            let models = onboardingVisibleModels
+            ScrollView(showsIndicators: true) {
+                VStack(spacing: 4) {
+                    ForEach(models) { model in
+                        onboardingModelRow(model: model)
+                        if model.id != models.last?.id {
+                            Divider().background(border.opacity(0.5))
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .frame(maxHeight: 250)
+        }
+        .padding(12)
         .background(card)
         .cornerRadius(14)
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(border, lineWidth: 1))
@@ -582,140 +622,203 @@ public struct OnboardingView: View {
         HStack(spacing: 8) {
             Image(systemName: "lock.shield.fill")
                 .foregroundColor(orange)
-                .font(.system(size: 14))
-            VStack(alignment: .leading, spacing: 2) {
+                .font(.system(size: 13))
+            VStack(alignment: .leading, spacing: 1) {
                 Text("100% Offline • Apple Metal GPU Acceleration")
-                    .font(.system(size: 11.5, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundColor(text)
-                Text("Audio is processed directly on Apple Silicon GPU/Neural Engine. Zero audio leaves your Mac, works on airplanes, and 100% free forever.")
-                    .font(.system(size: 10.5))
+                Text("Zero audio leaves your Mac, works on airplanes, and 100% free forever.")
+                    .font(.system(size: 10))
                     .foregroundColor(muted)
             }
+            Spacer()
         }
-        .padding(10)
+        .padding(8)
         .background(orange.opacity(0.08))
         .cornerRadius(8)
     }
 
-    private func whisperModelSelector(opt: WhisperModelOption) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("Whisper Model Variant:")
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundColor(text)
-                Spacer()
-                Menu {
-                    ForEach(LocalWhisperEngine.availableModels) { m in
-                        Button(action: {
-                            selectedLocalModel = m.id
-                            ConfigManager.shared.updateLocalWhisperModel(m.id)
-                        }) {
-                            HStack {
-                                Text("\(m.displayName) (\(m.sizeDescription))")
-                                if m.id == selectedLocalModel {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
+    private func onboardingModelRow(model: WhisperModelOption) -> some View {
+        let isHinglish = LocalWhisperEngine.shared.isHinglishModel(model.id)
+        let isDownloaded = localWhisper.isModelDownloaded(model.id)
+        let isDownloading = localWhisper.isDownloading[model.id] ?? false
+        let progress = localWhisper.downloadProgress[model.id] ?? 0.0
+        let isSelected = (selectedLocalModel == model.id)
+
+        return HStack(alignment: .center, spacing: 10) {
+            // Left Content: Title, metadata chips, specs (bio text removed)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    Text(model.displayName)
+                        .font(.system(size: 12.5, weight: .bold))
+                        .foregroundColor(text)
+
+                    if model.isRecommended || model.id == "turbo" {
+                        Text("RECOMMENDED")
+                            .font(.system(size: 8, weight: .black))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
+                            .background(orange.opacity(0.15))
+                            .foregroundColor(orange)
+                            .cornerRadius(4)
                     }
-                } label: {
-                    HStack(spacing: 5) {
-                        Text(opt.displayName)
-                            .font(.system(size: 11.5, weight: .semibold))
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 8))
+
+                    if isHinglish {
+                        Text("Hinglish (Latin)")
+                            .font(.system(size: 8.5, weight: .bold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
+                            .background(orange.opacity(0.15))
+                            .foregroundColor(orange)
+                            .cornerRadius(4)
+                    } else {
+                        Text(model.isEnglishOnly ? "English Only" : "99+ Languages")
+                            .font(.system(size: 8.5, weight: .medium))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
+                            .background(border.opacity(0.6))
+                            .foregroundColor(muted)
+                            .cornerRadius(4)
                     }
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(input).foregroundColor(text)
-                    .cornerRadius(6)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(border, lineWidth: 1))
                 }
-                .menuStyle(.borderlessButton)
+
+                HStack(spacing: 6) {
+                    HStack(spacing: 2) {
+                        Text("Speed")
+                            .foregroundColor(muted)
+                        Text("\(model.speedScore)/10")
+                            .fontWeight(.semibold)
+                            .foregroundColor(text)
+                    }
+                    Text("•")
+                        .foregroundColor(muted.opacity(0.4))
+                    HStack(spacing: 2) {
+                        Text("Accuracy")
+                            .foregroundColor(muted)
+                        Text("\(model.accuracyScore)/10")
+                            .fontWeight(.semibold)
+                            .foregroundColor(text)
+                    }
+                    Text("•")
+                        .foregroundColor(muted.opacity(0.4))
+                    HStack(spacing: 2) {
+                        Text("Size")
+                            .foregroundColor(muted)
+                        Text(model.sizeDescription)
+                            .fontWeight(.semibold)
+                            .foregroundColor(text)
+                    }
+                }
+                .font(.system(size: 10))
             }
 
-            HStack(spacing: 6) {
-                specPill(label: opt.parameters)
-                specPill(label: opt.sizeDescription)
-                specPill(label: opt.ramDescription)
-                specPill(label: opt.speedDescription)
+            Spacer(minLength: 8)
+
+            // Right Action
+            if isDownloading {
+                VStack(alignment: .trailing, spacing: 3) {
+                    HStack(spacing: 5) {
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(isDark ? Color(white: 0.2) : Color(white: 0.88))
+                                .frame(width: 65, height: 5)
+                            Capsule()
+                                .fill(orange)
+                                .frame(width: max(4, 65 * CGFloat(progress)), height: 5)
+                        }
+
+                        Text("\(Int(progress * 100))%")
+                            .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                            .foregroundColor(orange)
+
+                        Button(action: {
+                            localWhisper.cancelDownload(for: model.id)
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(muted)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Text("Downloading...")
+                        .font(.system(size: 9))
+                        .foregroundColor(muted)
+                }
+            } else if isDownloaded {
+                if isSelected {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 10, weight: .bold))
+                        Text(isHinglish ? "Active for Hinglish" : "Active")
+                            .font(.system(size: 10.5, weight: .bold))
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(orange.opacity(0.15))
+                    .foregroundColor(orange)
+                    .cornerRadius(6)
+                } else {
+                    Button(action: {
+                        selectedLocalModel = model.id
+                        ConfigManager.shared.updateLocalWhisperModel(model.id)
+                    }) {
+                        Text("Use Model")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(input)
+                            .foregroundColor(text)
+                            .cornerRadius(6)
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(border, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            } else {
+                Button(action: {
+                    selectedLocalModel = model.id
+                    ConfigManager.shared.updateLocalWhisperModel(model.id)
+                    localWhisper.startDownload(for: model.id)
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 10.5, weight: .bold))
+                        Text("Download")
+                            .font(.system(size: 10.5, weight: .bold))
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(orange)
+                    .foregroundColor(.white)
+                    .cornerRadius(6)
+                    .shadow(color: orange.opacity(0.3), radius: 4, x: 0, y: 2)
+                }
+                .buttonStyle(.plain)
             }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(isSelected ? orange.opacity(0.06) : Color.clear)
+        .cornerRadius(7)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selectedLocalModel = model.id
+            ConfigManager.shared.updateLocalWhisperModel(model.id)
         }
     }
 
-    @ViewBuilder
-    private func whisperStatusAction(opt: WhisperModelOption, isDownloaded: Bool, isDownloading: Bool, progress: Double) -> some View {
-        if isDownloaded {
-            HStack(spacing: 10) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.green)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(opt.displayName) is Ready")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(text)
-                    Text("Model downloaded on your Mac. You are ready to dictate offline.")
-                        .font(.system(size: 10.5))
-                        .foregroundColor(muted)
-                }
-                Spacer()
-            }
-            .padding(10)
-            .background(Color.green.opacity(0.08))
-            .cornerRadius(8)
-        } else if isDownloading {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Downloading \(opt.displayName)...")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundColor(text)
-                    Spacer()
-                    Text("\(Int(progress * 100))%")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(orange)
-                }
-                ProgressView(value: progress, total: 1.0)
-                    .accentColor(orange)
-                HStack {
-                    Text("One-time download. Safe to wait 10–30s on broadband.")
-                        .font(.system(size: 10))
-                        .foregroundColor(muted)
-                    Spacer()
-                    Button("Cancel") {
-                        localWhisper.cancelDownload(for: selectedLocalModel)
-                    }
-                    .font(.system(size: 10.5))
-                    .foregroundColor(muted)
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(10)
-            .background(input)
-            .cornerRadius(8)
-        } else {
-            VStack(spacing: 6) {
-                Button(action: {
-                    localWhisper.startDownload(for: selectedLocalModel)
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(.system(size: 13, weight: .bold))
-                        Text("Download \(opt.displayName) (\(opt.sizeDescription))")
-                            .font(.system(size: 12, weight: .bold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
-                    .background(orange)
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
-                    .shadow(color: orange.opacity(0.3), radius: 6, x: 0, y: 3)
-                }
-                .buttonStyle(.plain)
-
-                Text("Click to download once. Required before first dictation.")
-                    .font(.system(size: 10.5))
-                    .foregroundColor(muted)
-            }
+    private func syncCloudKeyForProvider(_ p: String) {
+        switch p {
+        case "Groq":
+            cloudApiKey = ConfigManager.shared.config.groqApiKey
+        case "Deepgram":
+            cloudApiKey = ConfigManager.shared.config.deepgramApiKey
+        case "OpenAI":
+            cloudApiKey = ConfigManager.shared.config.openaiApiKey
+        default:
+            cloudApiKey = ""
         }
+        cloudVerificationMessage = nil
+        isCloudVerified = !cloudApiKey.isEmpty
     }
 
     private var cloudEngineOnboardingCard: some View {
@@ -725,8 +828,7 @@ public struct OnboardingView: View {
                 ForEach(["Groq", "Deepgram", "OpenAI", "Localhost (Ollama)"], id: \.self) { p in
                     Button(action: {
                         selectedCloudProvider = p
-                        cloudVerificationMessage = nil
-                        isCloudVerified = false
+                        syncCloudKeyForProvider(p)
                     }) {
                         Text(p)
                             .font(.system(size: 11, weight: selectedCloudProvider == p ? .bold : .medium))
@@ -776,6 +878,10 @@ public struct OnboardingView: View {
                         .background(input)
                         .cornerRadius(8)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(border, lineWidth: 1))
+                        .onChange(of: cloudApiKey) { _ in
+                            isCloudVerified = false
+                            cloudVerificationMessage = nil
+                        }
                 }
             }
 
@@ -812,6 +918,11 @@ public struct OnboardingView: View {
         .background(card)
         .cornerRadius(14)
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(border, lineWidth: 1))
+        .onAppear {
+            if cloudApiKey.isEmpty {
+                syncCloudKeyForProvider(selectedCloudProvider)
+            }
+        }
     }
 
     private func verifyCloudKey() {
@@ -917,9 +1028,27 @@ public struct OnboardingView: View {
             .overlay(RoundedRectangle(cornerRadius: 5).stroke(border, lineWidth: 1))
     }
 
-    // MARK: ── Step 5: Languages Selection ────────────────────────────────────
+    private func selectOnboardingLanguage(_ l: String) {
+        selectedLanguages = [l]
+        if l.caseInsensitiveCompare("Hinglish") == .orderedSame {
+            languageMode = "hinglish"
+            ConfigManager.shared.updateLanguageMode("hinglish")
+            ConfigManager.shared.updateSelectedLanguages(["Hinglish"])
+            selectedLocalModel = "apex-q8"
+            ConfigManager.shared.updateLocalWhisperModel("apex-q8")
+        } else {
+            languageMode = "manual"
+            ConfigManager.shared.updateLanguageMode("manual")
+            ConfigManager.shared.updateSelectedLanguages([l])
+            if selectedLocalModel == "apex-q8" || selectedLocalModel == "apex-q5" {
+                selectedLocalModel = "turbo"
+                ConfigManager.shared.updateLocalWhisperModel("turbo")
+            }
+        }
+    }
+
+    // MARK: ── Step 3: Languages Selection ────────────────────────────────────
     private var languagesStep: some View {
-        let isEnglishOnly = ConfigManager.shared.config.localWhisperModel.lowercased().contains(".en") || ConfigManager.shared.config.localWhisperModel.lowercased().contains("parakeet")
         let activeLang = selectedLanguages.first ?? "English"
 
         return VStack(spacing: 0) {
@@ -934,145 +1063,122 @@ public struct OnboardingView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 14) {
-                    if isEnglishOnly {
-                        HStack(spacing: 10) {
-                            Image(systemName: "lock.shield.fill")
-                                .font(.system(size: 18))
-                                .foregroundColor(orange)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Locked to English")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundColor(text)
-                                Text("Your active speech model (\(ConfigManager.shared.config.localWhisperModel)) is English-only optimized. To speak Hindi, Spanish, etc., select a Multilingual model.")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(muted)
-                            }
-                        }
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(orange.opacity(0.1))
-                        .cornerRadius(10)
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(orange.opacity(0.25), lineWidth: 1))
-                    } else {
-                        // Current Active Language Display
-                        HStack {
-                            Text("Active Spoken Language:")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(text)
-                            Spacer()
-                            Text(activeLang)
-                                .font(.system(size: 12.5, weight: .bold))
-                                .foregroundColor(orange)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
-                                .background(orange.opacity(0.15))
-                                .cornerRadius(6)
-                        }
+                    // Current Active Language Display
+                    HStack {
+                        Text("Active Spoken Language:")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(text)
+                        Spacer()
+                        Text(activeLang)
+                            .font(.system(size: 12.5, weight: .bold))
+                            .foregroundColor(orange)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(orange.opacity(0.15))
+                            .cornerRadius(6)
+                    }
 
-                        Divider().background(border)
+                    Divider().background(border)
 
-                        // Popular Languages Quick Grid
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Popular Languages:")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(muted)
+                    // Popular Languages Quick Grid
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Popular Languages:")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(muted)
 
-                            let quick = ["English", "Hinglish", "Hindi", "Spanish", "French", "German", "Japanese", "Chinese", "Italian", "Portuguese", "Korean", "Russian"]
-                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                                ForEach(quick, id: \.self) { l in
-                                    let isSel = (activeLang == l)
-                                    Button(action: {
-                                        selectedLanguages = [l]
-                                        ConfigManager.shared.updateSpokenLanguage(l)
-                                    }) {
-                                        HStack(spacing: 4) {
-                                            if isSel {
-                                                Image(systemName: "checkmark").font(.system(size: 8, weight: .bold))
-                                            }
-                                            Text(l)
-                                                .font(.system(size: 11, weight: isSel ? .bold : .medium))
-                                                .lineLimit(1)
+                        let quick = ["English", "Hinglish", "Hindi", "Spanish", "French", "German", "Japanese", "Chinese", "Italian", "Portuguese", "Korean", "Russian"]
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                            ForEach(quick, id: \.self) { l in
+                                let isSel = (activeLang == l)
+                                Button(action: {
+                                    selectOnboardingLanguage(l)
+                                }) {
+                                    HStack(spacing: 4) {
+                                        if isSel {
+                                            Image(systemName: "checkmark").font(.system(size: 8, weight: .bold))
                                         }
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 6)
-                                        .background(isSel ? orange : input)
-                                        .foregroundColor(isSel ? .white : text)
-                                        .cornerRadius(6)
-                                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(isSel ? orange : border, lineWidth: 1))
+                                        Text(l)
+                                            .font(.system(size: 11, weight: isSel ? .bold : .medium))
+                                            .lineLimit(1)
                                     }
-                                    .buttonStyle(.plain)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 6)
+                                    .background(isSel ? orange : input)
+                                    .foregroundColor(isSel ? .white : text)
+                                    .cornerRadius(6)
+                                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(isSel ? orange : border, lineWidth: 1))
                                 }
+                                .buttonStyle(.plain)
                             }
                         }
+                    }
 
-                        // Searchable All 99+ Languages
-                        VStack(alignment: .leading, spacing: 8) {
-                            Button(action: {
-                                withAnimation { showLanguagePickerModal.toggle() }
-                            }) {
-                                HStack(spacing: 5) {
-                                    Image(systemName: showLanguagePickerModal ? "chevron.up" : "chevron.down")
-                                        .font(.system(size: 10, weight: .bold))
-                                    Text(showLanguagePickerModal ? "Hide All 99+ Languages" : "Browse All 99+ Languages...")
-                                        .font(.system(size: 11.5, weight: .semibold))
-                                }
-                                .foregroundColor(orange)
+                    // Searchable All 99+ Languages
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button(action: {
+                            withAnimation { showLanguagePickerModal.toggle() }
+                        }) {
+                            HStack(spacing: 5) {
+                                Image(systemName: showLanguagePickerModal ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 10, weight: .bold))
+                                Text(showLanguagePickerModal ? "Hide All 99+ Languages" : "Browse All 99+ Languages...")
+                                    .font(.system(size: 11.5, weight: .semibold))
                             }
-                            .buttonStyle(.plain)
+                            .foregroundColor(orange)
+                        }
+                        .buttonStyle(.plain)
 
-                            if showLanguagePickerModal {
-                                VStack(spacing: 8) {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundColor(muted)
-                                        TextField("Search 99+ languages...", text: $searchLanguageQuery)
-                                            .textFieldStyle(.plain)
-                                            .font(.system(size: 12))
-                                        if !searchLanguageQuery.isEmpty {
-                                            Button(action: { searchLanguageQuery = "" }) {
-                                                Image(systemName: "xmark.circle.fill").font(.system(size: 11)).foregroundColor(muted)
+                        if showLanguagePickerModal {
+                            VStack(spacing: 8) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundColor(muted)
+                                    TextField("Search 99+ languages...", text: $searchLanguageQuery)
+                                        .textFieldStyle(.plain)
+                                        .font(.system(size: 12))
+                                    if !searchLanguageQuery.isEmpty {
+                                        Button(action: { searchLanguageQuery = "" }) {
+                                            Image(systemName: "xmark.circle.fill").font(.system(size: 11)).foregroundColor(muted)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(8)
+                                .background(input)
+                                .cornerRadius(8)
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(border, lineWidth: 1))
+
+                                let filtered = availableLanguages.filter {
+                                    searchLanguageQuery.isEmpty || $0.localizedCaseInsensitiveContains(searchLanguageQuery)
+                                }
+
+                                ScrollView {
+                                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                                        ForEach(filtered, id: \.self) { l in
+                                            let isSel = (activeLang == l)
+                                            Button(action: {
+                                                selectOnboardingLanguage(l)
+                                            }) {
+                                                HStack(spacing: 4) {
+                                                    if isSel {
+                                                        Image(systemName: "checkmark").font(.system(size: 8, weight: .bold))
+                                                    }
+                                                    Text(l)
+                                                        .font(.system(size: 11, weight: isSel ? .bold : .medium))
+                                                        .lineLimit(1)
+                                                }
+                                                .frame(maxWidth: .infinity)
+                                                .padding(.horizontal, 6).padding(.vertical, 5)
+                                                .background(isSel ? orange.opacity(0.15) : input)
+                                                .foregroundColor(isSel ? orange : text)
+                                                .cornerRadius(6)
+                                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(isSel ? orange : border, lineWidth: 1))
                                             }
                                             .buttonStyle(.plain)
                                         }
                                     }
-                                    .padding(8)
-                                    .background(input)
-                                    .cornerRadius(8)
-                                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(border, lineWidth: 1))
-
-                                    let filtered = availableLanguages.filter {
-                                        searchLanguageQuery.isEmpty || $0.localizedCaseInsensitiveContains(searchLanguageQuery)
-                                    }
-
-                                    ScrollView {
-                                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                                            ForEach(filtered, id: \.self) { l in
-                                                let isSel = (activeLang == l)
-                                                Button(action: {
-                                                    selectedLanguages = [l]
-                                                    ConfigManager.shared.updateSpokenLanguage(l)
-                                                }) {
-                                                    HStack(spacing: 4) {
-                                                        if isSel {
-                                                            Image(systemName: "checkmark").font(.system(size: 8, weight: .bold))
-                                                        }
-                                                        Text(l)
-                                                            .font(.system(size: 11, weight: isSel ? .bold : .medium))
-                                                            .lineLimit(1)
-                                                    }
-                                                    .frame(maxWidth: .infinity)
-                                                    .padding(.horizontal, 6).padding(.vertical, 5)
-                                                    .background(isSel ? orange.opacity(0.15) : input)
-                                                    .foregroundColor(isSel ? orange : text)
-                                                    .cornerRadius(6)
-                                                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(isSel ? orange : border, lineWidth: 1))
-                                                }
-                                                .buttonStyle(.plain)
-                                            }
-                                        }
-                                        .padding(.vertical, 2)
-                                    }
-                                    .frame(maxHeight: 140)
+                                    .padding(.vertical, 2)
                                 }
+                                .frame(maxHeight: 140)
                             }
                         }
                     }

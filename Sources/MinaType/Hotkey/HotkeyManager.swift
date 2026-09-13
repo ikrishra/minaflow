@@ -56,8 +56,8 @@ public class HotkeyManager {
 
         let selected = ConfigManager.shared.config.hotkey
 
-        // 1. Setup Carbon HotKey for Option + Space (if selected)
-        if selected == "option+space" {
+        // 1. Setup Carbon HotKey for Option + Space (if selected or if Accessibility is not granted)
+        if selected == "option+space" || !AXIsProcessTrusted() {
             setupCarbonHotKey()
         }
 

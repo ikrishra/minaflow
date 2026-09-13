@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import SwiftUI
 import CoreAudio
+import AVFoundation
 
 public class MinaMenuController: NSObject, AudioRecorderDelegate, HotkeyManagerDelegate {
     public static let shared = MinaMenuController()
@@ -432,21 +433,30 @@ public class MinaMenuController: NSObject, AudioRecorderDelegate, HotkeyManagerD
 
     @objc private func checkPermissions() {
         closePopover()
+        let micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         let isAccGranted = PasteInjector.shared.isAccessibilityGranted()
-        let alert = NSAlert()
-        alert.messageText = "MinaFlow Permissions"
-        if isAccGranted {
-            alert.informativeText = "Accessibility permission is active. MinaFlow is ready to auto-type into your focused apps."
+        if micGranted && isAccGranted {
+            let alert = NSAlert()
+            alert.messageText = "MinaFlow Permissions Active"
+            alert.informativeText = "Microphone and Accessibility permissions are both active. MinaFlow is ready to voice-type in any app!"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
         } else {
-            alert.informativeText = "Accessibility permission is required for auto-pasting and global Fn hotkey detection. Click Request to open System Settings."
-            alert.addButton(withTitle: "Open System Settings")
-            alert.addButton(withTitle: "Cancel")
-            if alert.runModal() == .alertFirstButtonReturn {
-                PasteInjector.shared.promptAccessibilityPermission()
-            }
-            return
+            promptMissingPermissions()
         }
-        alert.runModal()
+    }
+
+    private func promptMissingPermissions() {
+        let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "MinaFlow_HasCompletedOnboarding")
+        if hasCompletedOnboarding {
+            logMessage("Permissions missing for returning user -> Opening Dashboard > Preferences (System Permissions)...")
+            DashboardWindowController.shared.show(tab: 5)
+        } else {
+            logMessage("Permissions missing for new user -> Opening Onboarding > Step 1 (Permissions)...")
+            OnboardingWindowController.shared.show(step: 1)
+        }
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func quitApp() {
@@ -458,6 +468,20 @@ public class MinaMenuController: NSObject, AudioRecorderDelegate, HotkeyManagerD
     // MARK: - HotkeyManagerDelegate
     public func hotkeyDidStart() {
         guard !isBusy, !AudioRecorder.shared.isRecording else { return }
+
+        // 0. Permissions Pre-flight: Check Microphone & Accessibility
+        let micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        let axGranted = AXIsProcessTrusted()
+
+        if !micGranted || !axGranted {
+            logMessage("Dictation trigger blocked: Required permissions missing (Microphone: \(micGranted), Accessibility: \(axGranted)).")
+            HotkeyManager.shared.notifyRecordingEnded()
+            MediaController.shared.unmuteNow()
+            FloatingHUDWindow.shared.hide(after: 0.1)
+            NSSound(named: "Basso")?.play()
+            promptMissingPermissions()
+            return
+        }
 
         let config = ConfigManager.shared.config
 
@@ -735,7 +759,10 @@ public class MinaMenuController: NSObject, AudioRecorderDelegate, HotkeyManagerD
 
         isBusy = true
         updateMenu()
-        FloatingHUDWindow.shared.setMode(.polishing)
+
+        let willPolishWithAI = currentConfig.canUseAIPolish && currentConfig.isAIPolishEnabled && currentConfig.hasConfiguredAIProvider
+        // When dictation finishes, switch to animated waves without red dot
+        FloatingHUDWindow.shared.setMode(.transcribing)
 
         // If selection was not captured at start (e.g. Fn/Option held down),
         // capture it now that modifier keys are fully released!
@@ -797,6 +824,9 @@ public class MinaMenuController: NSObject, AudioRecorderDelegate, HotkeyManagerD
                                 } else {
                                     FloatingHUDWindow.shared.setMode(.accessibilityNeeded)
                                     FloatingHUDWindow.shared.hide(after: 3.0)
+                                    if !AXIsProcessTrusted() {
+                                        self.promptMissingPermissions()
+                                    }
                                 }
                                 self.updateMenu()
                             }
@@ -846,6 +876,11 @@ public class MinaMenuController: NSObject, AudioRecorderDelegate, HotkeyManagerD
                 }
 
                 // 4. Polish and format with LLM (~50ms)
+                if willPolishWithAI {
+                    await MainActor.run {
+                        FloatingHUDWindow.shared.setMode(.polishing)
+                    }
+                }
                 let llmStart = Date()
                 var rawPolished: String = rawTranscript
                 do {
@@ -908,6 +943,9 @@ public class MinaMenuController: NSObject, AudioRecorderDelegate, HotkeyManagerD
                             } else {
                                 FloatingHUDWindow.shared.setMode(.accessibilityNeeded)
                                 FloatingHUDWindow.shared.hide(after: 3.0)
+                                if !AXIsProcessTrusted() {
+                                    self.promptMissingPermissions()
+                                }
                             }
                             self.updateMenu()
                         }
@@ -932,6 +970,13 @@ public class MinaMenuController: NSObject, AudioRecorderDelegate, HotkeyManagerD
         logMessage("Double-tap shortcut detected -> Pasting last dictation...")
         AudioRecorder.shared.cancelRecording()
         MediaController.shared.unmuteNow()
+
+        if !AXIsProcessTrusted() {
+            logMessage("Double-tap blocked: Accessibility permission not granted.")
+            NSSound(named: "Basso")?.play()
+            promptMissingPermissions()
+            return
+        }
 
         guard let textToPaste = PasteInjector.shared.lastPastedText ?? (!lastTranscript.isEmpty ? lastTranscript : nil),
               !textToPaste.isEmpty else {

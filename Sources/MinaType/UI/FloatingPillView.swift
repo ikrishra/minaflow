@@ -4,6 +4,7 @@ import AppKit
 public enum HUDMode: Equatable {
     case hidden
     case listening
+    case transcribing
     case polishing
     case offline
     case accessibilityNeeded
@@ -29,7 +30,13 @@ public class HUDViewModel: ObservableObject {
 
 public struct FloatingPillView: View {
     @ObservedObject var viewModel: HUDViewModel
-    @State private var pulseRecordDot = false
+
+    private var isDarkMode: Bool {
+        let theme = ConfigManager.shared.config.appTheme
+        if theme == "dark" { return true }
+        if theme == "light" { return false }
+        return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
 
     public var body: some View {
         Group {
@@ -38,51 +45,29 @@ public struct FloatingPillView: View {
                 EmptyView()
 
             case .listening:
-                HStack(spacing: 8) {
-                    // Pulsing orange live recording dot
-                    ZStack {
-                        Circle()
-                            .fill(Color(red: 1.0, green: 0.333, blue: 0.0).opacity(0.35))
-                            .frame(width: 14, height: 14)
-                            .scaleEffect(pulseRecordDot ? 1.3 : 0.9)
-                            .animation(Animation.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulseRecordDot)
-
-                        Circle()
-                            .fill(Color(red: 1.0, green: 0.333, blue: 0.0))
-                            .frame(width: 7, height: 7)
-                    }
-                    .onAppear { pulseRecordDot = true }
-
-                    // Responsive 6-bar soundwave
-                    HStack(spacing: 2.5) {
-                        AudioWaveBar(index: 0, level: viewModel.audioLevel, baseMultiplier: 0.45)
-                        AudioWaveBar(index: 1, level: viewModel.audioLevel, baseMultiplier: 0.8)
-                        AudioWaveBar(index: 2, level: viewModel.audioLevel, baseMultiplier: 1.2)
-                        AudioWaveBar(index: 3, level: viewModel.audioLevel, baseMultiplier: 1.0)
-                        AudioWaveBar(index: 4, level: viewModel.audioLevel, baseMultiplier: 0.75)
-                        AudioWaveBar(index: 5, level: viewModel.audioLevel, baseMultiplier: 0.45)
-                    }
-                    .frame(height: 18)
-
-                    Text("Listening")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
+                // Responsive 7-bar soundwave driven by microphone level (no text)
+                HStack(spacing: 3) {
+                    AudioWaveBar(index: 0, level: viewModel.audioLevel, baseMultiplier: 0.45)
+                    AudioWaveBar(index: 1, level: viewModel.audioLevel, baseMultiplier: 0.75)
+                    AudioWaveBar(index: 2, level: viewModel.audioLevel, baseMultiplier: 1.1)
+                    AudioWaveBar(index: 3, level: viewModel.audioLevel, baseMultiplier: 1.35)
+                    AudioWaveBar(index: 4, level: viewModel.audioLevel, baseMultiplier: 1.1)
+                    AudioWaveBar(index: 5, level: viewModel.audioLevel, baseMultiplier: 0.75)
+                    AudioWaveBar(index: 6, level: viewModel.audioLevel, baseMultiplier: 0.45)
                 }
-                .padding(.horizontal, 14)
+                .frame(height: 18)
+                .padding(.horizontal, 16)
                 .padding(.vertical, 6)
 
-            case .polishing:
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 1.0, green: 0.45, blue: 0.1)))
-                        .scaleEffect(0.65)
-                        .frame(width: 14, height: 14)
-
-                    Text("Polishing...")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundColor(Color.white.opacity(0.95))
+            case .transcribing, .polishing:
+                // Fluid travelling ripple wave animation (no text, unified format for both transcribing & AI polishing)
+                HStack(spacing: 3) {
+                    ForEach(0..<7, id: \.self) { i in
+                        TranscribingWaveBar(index: i)
+                    }
                 }
-                .padding(.horizontal, 14)
+                .frame(height: 18)
+                .padding(.horizontal, 16)
                 .padding(.vertical, 6)
 
             case .offline:
@@ -92,7 +77,7 @@ public struct FloatingPillView: View {
                         .foregroundColor(.orange)
                     Text("Offline")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white)
+                        .foregroundColor(isDarkMode ? .white : Color(red: 0.1, green: 0.1, blue: 0.12))
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
@@ -104,7 +89,7 @@ public struct FloatingPillView: View {
                         .foregroundColor(.yellow)
                     Text("Accessibility Needed")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white)
+                        .foregroundColor(isDarkMode ? .white : Color(red: 0.1, green: 0.1, blue: 0.12))
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
@@ -116,7 +101,7 @@ public struct FloatingPillView: View {
                         .foregroundColor(.orange)
                     Text(msg)
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white)
+                        .foregroundColor(isDarkMode ? .white : Color(red: 0.1, green: 0.1, blue: 0.12))
                         .lineLimit(1)
                 }
                 .padding(.horizontal, 14)
@@ -127,35 +112,90 @@ public struct FloatingPillView: View {
         .background(
             ZStack {
                 VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
-                Color(red: 0.08, green: 0.08, blue: 0.10, opacity: 0.94)
+                if isDarkMode {
+                    Color(red: 0.08, green: 0.08, blue: 0.10, opacity: 0.94)
+                } else {
+                    Color.white.opacity(0.94)
+                }
                 RoundedRectangle(cornerRadius: 17)
-                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                    .stroke(
+                        Color(red: 1.0, green: 0.333, blue: 0.0).opacity(isDarkMode ? 0.35 : 0.45),
+                        lineWidth: 1
+                    )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 17))
-        .shadow(color: Color.black.opacity(0.45), radius: 14, x: 0, y: 5)
+        .shadow(
+            color: Color(red: 1.0, green: 0.333, blue: 0.0).opacity(isDarkMode ? 0.25 : 0.18),
+            radius: 12, x: 0, y: 4
+        )
     }
 }
 
-// Fluid spring audio wave bar
-private struct AudioWaveBar: View {
+// Fluid travelling soundwave bar for processing/transcribing (harmonic wave ripple)
+private struct TranscribingWaveBar: View {
     let index: Int
-    let level: Float
-    let baseMultiplier: CGFloat
+    @State private var wavePhase: Bool = false
 
     var body: some View {
-        let dynamicHeight = max(5.0, min(18.0, CGFloat(level) * 26.0 * baseMultiplier))
+        let minH: CGFloat = 4.0
+        let maxH: CGFloat = index == 3 ? 19.0 : (index == 2 || index == 4 ? 16.0 : (index == 1 || index == 5 ? 12.0 : 7.0))
+        let dynamicHeight = wavePhase ? maxH : minH
 
         RoundedRectangle(cornerRadius: 1.5)
             .fill(
                 LinearGradient(
-                    colors: [Color.white, Color(red: 1.0, green: 0.85, blue: 0.7)],
+                    colors: [
+                        Color(red: 1.0, green: 0.62, blue: 0.18),
+                        Color(red: 1.0, green: 0.333, blue: 0.0)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .frame(width: 2.5, height: dynamicHeight)
+            .animation(
+                Animation.easeInOut(duration: 0.36)
+                    .repeatForever(autoreverses: true)
+                    .delay(Double(index) * 0.065),
+                value: wavePhase
+            )
+            .onAppear {
+                wavePhase = true
+            }
+    }
+}
+
+// Responsive microphone audio wave bar (live audio bounce)
+private struct AudioWaveBar: View {
+    let index: Int
+    let level: Float
+    let baseMultiplier: CGFloat
+    @State private var wavePhase: Bool = false
+
+    var body: some View {
+        let activeHeight = CGFloat(level) * 26.0 * baseMultiplier
+        let ambientHeight: CGFloat = wavePhase ? (6.0 + CGFloat(index % 3) * 3.5) : (4.0 + CGFloat((index + 1) % 3) * 2.0)
+        let dynamicHeight = max(4.0, min(19.0, level > 0.02 ? activeHeight : ambientHeight))
+
+        RoundedRectangle(cornerRadius: 1.5)
+            .fill(
+                LinearGradient(
+                    colors: [
+                        Color(red: 1.0, green: 0.62, blue: 0.18),
+                        Color(red: 1.0, green: 0.333, blue: 0.0)
+                    ],
                     startPoint: .top,
                     endPoint: .bottom
                 )
             )
             .frame(width: 2.5, height: dynamicHeight)
             .animation(.spring(response: 0.12, dampingFraction: 0.65, blendDuration: 0), value: dynamicHeight)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.45).repeatForever(autoreverses: true).delay(Double(index) * 0.08)) {
+                    wavePhase = true
+                }
+            }
     }
 }
 
@@ -184,7 +224,7 @@ public class FloatingHUDWindow: NSPanel {
 
     private init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 150, height: 38),
+            contentRect: NSRect(x: 0, y: 0, width: 84, height: 38),
             styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: false
@@ -208,10 +248,8 @@ public class FloatingHUDWindow: NSPanel {
 
         let pillWidth: CGFloat
         switch viewModel.mode {
-        case .listening:
-            pillWidth = 148
-        case .polishing:
-            pillWidth = 126
+        case .listening, .transcribing, .polishing:
+            pillWidth = 84
         case .offline:
             pillWidth = 118
         case .accessibilityNeeded:

@@ -403,7 +403,10 @@ public struct MinaConfig: Codable {
         self.mode = try container.decodeIfPresent(String.self, forKey: CodingKeys.mode) ?? "toggle"
         self.languageMode = try container.decodeIfPresent(String.self, forKey: CodingKeys.languageMode) ?? "manual"
         self.selectedLanguages = try container.decodeIfPresent([String].self, forKey: CodingKeys.selectedLanguages) ?? ["English"]
-        self.toneMode = try container.decodeIfPresent(String.self, forKey: CodingKeys.toneMode) ?? "veryCasual"
+        let polishEnabled = try container.decodeIfPresent(Bool.self, forKey: CodingKeys.isAIPolishEnabled) ?? false
+        self.isAIPolishEnabled = polishEnabled
+        let rawTone = try container.decodeIfPresent(String.self, forKey: CodingKeys.toneMode) ?? "veryCasual"
+        self.toneMode = polishEnabled ? rawTone : "veryCasual"
         self.snippets = try container.decodeIfPresent([String: String].self, forKey: CodingKeys.snippets) ?? [:]
         self.playSounds = try container.decodeIfPresent(Bool.self, forKey: CodingKeys.playSounds) ?? true
         self.customVocabulary = try container.decodeIfPresent([String].self, forKey: CodingKeys.customVocabulary) ?? []
@@ -511,6 +514,12 @@ public class ConfigManager: ObservableObject {
                 save()
             } else if self.config.selectedLanguages.count > 1 {
                 self.config.selectedLanguages = [self.config.selectedLanguages.first ?? "English"]
+                save()
+            }
+
+            // If AI Polish is off, always ensure tone is set to Direct (veryCasual)
+            if !self.config.isAIPolishEnabled {
+                self.config.toneMode = "veryCasual"
                 save()
             }
         } catch {
@@ -878,6 +887,9 @@ public class ConfigManager: ObservableObject {
 
     public func updateAIPolishEnabled(_ enabled: Bool) {
         config.isAIPolishEnabled = enabled
+        if !enabled {
+            config.toneMode = "veryCasual"
+        }
         if enabled && config.isLicenseActivated {
             // Automatically turn on Highlight-to-Edit when AI Polish is on
             config.isEditModeEnabled = true
@@ -885,6 +897,7 @@ public class ConfigManager: ObservableObject {
         save()
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: NSNotification.Name("MinaFlowAIPolishUpdated"), object: nil)
+            NotificationCenter.default.post(name: NSNotification.Name("MinaFlowToneUpdated"), object: nil)
         }
     }
 
