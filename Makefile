@@ -80,7 +80,6 @@ dmg: build
 			--icon "$(APP_NAME).app" 180 190 \
 			--hide-extension "$(APP_NAME).app" \
 			--app-drop-link 480 190 \
-			--skip-jenkins \
 			--overwrite \
 			MinaFlow.dmg \
 			.dmg-staging || { \
