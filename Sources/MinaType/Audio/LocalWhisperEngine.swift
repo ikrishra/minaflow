@@ -355,6 +355,14 @@ public final class LocalWhisperEngine: ObservableObject {
     }
 
     public static func promptForHinglishDownloadIfNeeded(onAccept: (() -> Void)? = nil, onCancel: (() -> Void)? = nil) {
+        // Never prompt during onboarding! Onboarding handles model selection & download in its own Speech Engine step.
+        let isOnboardingActive = !UserDefaults.standard.bool(forKey: "MinaFlow_HasCompletedOnboarding") ||
+                                 (OnboardingWindowController.shared.window?.isVisible == true)
+        guard !isOnboardingActive else {
+            onAccept?()
+            return
+        }
+
         let isDownloaded = shared.isModelDownloaded("apex-q8") || shared.isModelDownloaded("apex-q5")
         if isDownloaded {
             onAccept?()

@@ -606,7 +606,9 @@ public class ConfigManager: ObservableObject {
             let isHinglishReady = LocalWhisperEngine.shared.isModelDownloaded(hModel) ||
                                   LocalWhisperEngine.shared.isModelDownloaded("apex-q8") ||
                                   LocalWhisperEngine.shared.isModelDownloaded("apex-q5")
-            if !isHinglishReady {
+            let isOnboardingActive = !UserDefaults.standard.bool(forKey: "MinaFlow_HasCompletedOnboarding") ||
+                                     (OnboardingWindowController.shared.window?.isVisible == true)
+            if !isHinglishReady && !isOnboardingActive {
                 LocalWhisperEngine.promptForHinglishDownloadIfNeeded(
                     onAccept: {
                         self.config.selectedLanguages = ["Hinglish"]
